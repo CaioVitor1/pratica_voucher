@@ -1,77 +1,146 @@
-import * as voucherFunctions from "../../src/services/voucherService"
+import { jest } from '@jest/globals';
 
-import { faker } from "@faker-js/faker"
-describe("createVoucher", () => {
-	it("should return a new voucher register", () => {
-		const newVoucher = {
-            code: faker.finance.amount(),
-            discount: 777,
-        }
-		try{
-            const result = voucherFunctions.default.createVoucher(newVoucher.code, newVoucher.discount)
-            expect(result).toEqual(Object);
-        }catch(erro){
-            
-        }
-		
-		
-		
-	});    
+import voucherRepository from '../../src/repositories/voucherRepository';
+import voucherService from '../../src/services/voucherService';
 
-    it("should return a message 'Voucher already exist.'", () => {
-		const newVoucher = {
-            code: "1",
-            discount: 777,
-        }
-		try{
-            const result = voucherFunctions.default.createVoucher(newVoucher.code, newVoucher.discount)
-        }catch(erro){
-            expect(erro).toEqual(erro.conflictError('Voucher already exist.'));
-        }
-		
-		
-		
-	});
-
+beforeEach(() => {
+  jest.resetAllMocks();
+  jest.clearAllMocks();
 });
 
-describe("applyVoucher", () => {
-	it("Voucher is not register", () => {
-		const newVoucher = {
-            code: faker.finance.amount(),
-            amount: 777,
-        }
-		try{
-            const result = voucherFunctions.default.applyVoucher(newVoucher.code, newVoucher.amount)
-        }catch(erro){
-            expect(erro).toEqual(erro.conflictError('Voucher does not exist.'));
-        }
-		
-		
-		
-	});    
-/*
-    it("amount not valid for discount", () => {
-		const newVoucher = {
-            code: "1",
-            amount: 50,
-        }
-		
-		const result = voucherFunctions.default.applyVoucher(newVoucher.code, newVoucher.amount)
-		
-		expect(result).toStrictEqual(Object);
-	});  
+describe('Testes unitários do voucher service', () => {
+  it('Deve criar um voucher', async () => {
+    const voucher = {
+      code: 'aaa',
+      discount: 10
+    };
 
-    it("body valid for discount", () => {
-		const newVoucher = {
-            code: "1",
-            amount: 500,
-        }
-		
-		const result = voucherFunctions.default.applyVoucher(newVoucher.code, newVoucher.amount)
-		
-		expect(result).toStrictEqual(Object);
-	});  */
+    jest
+      .spyOn(voucherRepository, 'getVoucherByCode')
+      .mockImplementationOnce((): any => {});
 
+    jest
+      .spyOn(voucherRepository, 'createVoucher')
+      .mockImplementationOnce((): any => {});
+
+    await voucherService.createVoucher(voucher.code, voucher.discount);
+
+    expect(voucherRepository.getVoucherByCode).toBeCalled();
+    expect(voucherRepository.createVoucher).toBeCalled();
+  });
+
+  it('Não deve criar um voucher duplicado', async () => {
+    const voucher = {
+      code: 'aaa',
+      discount: 10
+    };
+
+    jest
+      .spyOn(voucherRepository, 'getVoucherByCode')
+      .mockImplementationOnce((): any => {
+        return {
+          code: 'aaa',
+          discount: 10
+        };
+      });
+
+    const promise = voucherService.createVoucher(
+      voucher.code,
+      voucher.discount
+    );
+
+    expect(promise).rejects.toEqual({
+      type: 'conflict',
+      message: 'Voucher already exist.'
+    });
+
+    expect(voucherRepository.createVoucher).not.toBeCalled();
+  });
+
+  it('Deveria aplicar desconto', async () => {
+    const voucher = { code: 'AAA', discount: 10 };
+
+    jest
+      .spyOn(voucherRepository, 'getVoucherByCode')
+      .mockImplementationOnce((): any => {
+        return {
+          id: 1,
+          code: voucher.code,
+          discount: voucher.discount,
+          used: false
+        };
+      });
+    jest
+      .spyOn(voucherRepository, 'useVoucher')
+      .mockImplementationOnce((): any => {});
+
+    const amount = 1000;
+    const order = await voucherService.applyVoucher(voucher.code, amount);
+    expect(order.amount).toBe(amount);
+    expect(order.discount).toBe(voucher.discount);
+    expect(order.finalAmount).toBe(amount - amount * (voucher.discount / 100));
+  });
+
+  it('Não deve aplicar desconto para valores abaixo de 100', async () => {
+    const voucher = { code: 'AAA', discount: 10 };
+
+    jest
+      .spyOn(voucherRepository, 'getVoucherByCode')
+      .mockImplementationOnce((): any => {
+        return {
+          id: 1,
+          code: voucher.code,
+          discount: voucher.discount,
+          used: false
+        };
+      });
+    jest
+      .spyOn(voucherRepository, 'useVoucher')
+      .mockImplementationOnce((): any => {});
+
+    const amount = 99;
+    const order = await voucherService.applyVoucher(voucher.code, amount);
+    expect(order.amount).toBe(amount);
+    expect(order.discount).toBe(voucher.discount);
+    expect(order.finalAmount).toBe(amount);
+  });
+
+  it('Não deve aplicar desconto para voucher usado', async () => {
+    const voucher = { code: 'BBB', discount: 10 };
+
+    jest
+      .spyOn(voucherRepository, 'getVoucherByCode')
+      .mockImplementationOnce((): any => {
+        return {
+          id: 1,
+          code: voucher.code,
+          discount: voucher.discount,
+          used: true
+        };
+      });
+
+    const amount = 1000;
+    const order = await voucherService.applyVoucher(voucher.code, amount);
+    expect(order.amount).toBe(amount);
+    expect(order.discount).toBe(voucher.discount);
+    expect(order.finalAmount).toBe(amount);
+    expect(order.applied).toBe(false);
+  });
+
+  it('Não deve aplicar desconto para voucher inválido', async () => {
+    const voucher = { code: 'CCC', discount: 10 };
+
+    jest
+      .spyOn(voucherRepository, 'getVoucherByCode')
+      .mockImplementationOnce((): any => {
+        return undefined;
+      });
+
+    const amount = 1000;
+    const promise = voucherService.applyVoucher(voucher.code, amount);
+    expect(promise).rejects.toEqual({
+      message: 'Voucher does not exist.',
+      type: 'conflict'
+    });
+  });
 });
-
